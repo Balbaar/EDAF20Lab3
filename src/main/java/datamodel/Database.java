@@ -83,36 +83,37 @@ public class Database {
 
     /* --- TODO: insert more own code here --- */
 
-    public Show getShowData(String mTitle, String mDate) {
+public Show getShowData(String mTitle, String mDate) {
 
-        Integer mFreeSeats = 0;
-        String mVenue = null;
+    Integer mFreeSeats = 0;
+    String mVenue = null;
 
-        try {
-            ResultSet rs = conn.createStatement()
-                    .executeQuery("SELECT * FROM Shows WHERE day = '" + mDate + "' AND movieName = '" + mTitle + "'");
-
+    String query = "SELECT * FROM Shows WHERE day = ? AND movieName = ?";
+    try (PreparedStatement pstmt = conn.prepareStatement(query)) {
+        pstmt.setString(1, mDate);
+        pstmt.setString(2, mTitle);
+        try (ResultSet rs = pstmt.executeQuery()) {
             while (rs.next()) {
                 mFreeSeats = rs.getInt("freeSeats");
                 mVenue = rs.getString("theaterName");
             }
-
-        } catch (SQLException e) {
-            e.printStackTrace();
         }
-
-
-        return new Show(mTitle, mDate, mVenue, mFreeSeats);
+    } catch (SQLException e) {
+        e.printStackTrace();
     }
 
-    public boolean login(String uname) {
+    return new Show(mTitle, mDate, mVenue, mFreeSeats);
+}
 
-        try {
-            ResultSet rs = conn.createStatement()
-                    .executeQuery("SELECT username FROM Users WHERE username = '" + uname + "'");
-            if (rs.next()) {
-                currName = uname;
-                return true;
+    public boolean login(String uname) {
+        String query = "SELECT username FROM Users WHERE username = ?";
+        try (PreparedStatement pstmt = conn.prepareStatement(query)) {
+            pstmt.setString(1, uname);
+            try (ResultSet rs = pstmt.executeQuery()) {
+                if (rs.next()) {
+                    currName = uname;
+                    return true;
+                }
             }
         } catch (SQLException e) {
             e.printStackTrace();
@@ -123,11 +124,13 @@ public class Database {
     public List<String> getDates(String m) {
         List<String> dates = new ArrayList<>();
 
-        try {
-            ResultSet rs = conn.createStatement()
-                    .executeQuery("SELECT day FROM Shows WHERE movieName = '" + m + "'");
-            while (rs.next()) {
-                dates.add(rs.getString("day"));
+        String query = "SELECT day FROM Shows WHERE movieName = ?";
+        try (PreparedStatement pstmt = conn.prepareStatement(query)) {
+            pstmt.setString(1, m);
+            try (ResultSet rs = pstmt.executeQuery()) {
+                while (rs.next()) {
+                    dates.add(rs.getString("day"));
+                }
             }
         } catch (SQLException e) {
             e.printStackTrace();
@@ -139,9 +142,9 @@ public class Database {
     public List<String> getMovies() {
         List<String> movies = new ArrayList<>();
 
-        try {
-            ResultSet rs = conn.createStatement()
-                    .executeQuery("SELECT DISTINCT(movieName) AS mName FROM Shows");
+        String query = "SELECT DISTINCT(movieName) AS mName FROM Shows";
+        try (PreparedStatement pstmt = conn.prepareStatement(query);
+             ResultSet rs = pstmt.executeQuery()) {
             while (rs.next()) {
                 movies.add(rs.getString("mName"));
             }
@@ -154,45 +157,69 @@ public class Database {
 
     public boolean bookTicket(String movieName, String date) {
         String theaterName = null;
+        boolean success = false;
 
         try {
-            ResultSet rs = conn.createStatement()
-                    .executeQuery("SELECT theaterName FROM Shows WHERE movieName = '" + movieName + "' " +
-                            "AND day = '" + date + "';");
-            while (rs.next()) {
-                theaterName = rs.getString("theaterName");
+            conn.setAutoCommit(false); // Start transaction
+
+            // Get theater name
+            String queryTheater = "SELECT theaterName FROM Shows WHERE movieName = ? AND day = ?";
+            try (PreparedStatement pstmt = conn.prepareStatement(queryTheater)) {
+                pstmt.setString(1, movieName);
+                pstmt.setString(2, date);
+                try (ResultSet rs = pstmt.executeQuery()) {
+                    if (rs.next()) {
+                        theaterName = rs.getString("theaterName");
+                    }
+                }
             }
+
+            if (theaterName != null) {
+                // Insert reservation
+                String insertReservation = "INSERT INTO Reservations(username, movieName, theaterName, day) VALUES (?, ?, ?, ?)";
+                try (PreparedStatement pstmt = conn.prepareStatement(insertReservation)) {
+                    pstmt.setString(1, currName);
+                    pstmt.setString(2, movieName);
+                    pstmt.setString(3, theaterName);
+                    pstmt.setString(4, date);
+                    pstmt.executeUpdate();
+                    success = true;
+                }
+            }
+
+            conn.commit(); // Commit transaction
         } catch (SQLException e) {
-            e.printStackTrace();
-        }
-
-        if (theaterName != null) {
             try {
-                conn.createStatement()
-                        .executeUpdate("INSERT INTO Reservations(username, movieName, theaterName, day) " +
-                                "VALUES ('" + currName + "', '" + movieName + "', '" + theaterName + "', '" + date + "')");
-                return true;
-            } catch (SQLException e) {
-                e.printStackTrace();
+                conn.rollback(); // Rollback transaction on error
+            } catch (SQLException rollbackEx) {
+                rollbackEx.printStackTrace();
+            }
+            e.printStackTrace();
+        } finally {
+            try {
+                conn.setAutoCommit(true); // Restore default auto-commit mode
+            } catch (SQLException ex) {
+                ex.printStackTrace();
             }
         }
 
-        return false;
+        return success;
     }
 
     public List<Reservation> getReservations() {
         List<Reservation> reservations = new ArrayList<>();
 
-        try {
-            ResultSet rs = conn.createStatement()
-                    .executeQuery("SELECT * FROM Reservations WHERE username = '" + currName + "'");
-            while (rs.next()) {
-                reservations.add(new Reservation(rs.getInt("nbr"), rs.getString("movieName"),
-                        rs.getString("day"), rs.getString("theaterName")));
+        String query = "SELECT * FROM Reservations WHERE username = ?";
+        try (PreparedStatement pstmt = conn.prepareStatement(query)) {
+            pstmt.setString(1, currName);
+            try (ResultSet rs = pstmt.executeQuery()) {
+                while (rs.next()) {
+                    reservations.add(new Reservation(rs.getInt("nbr"), rs.getString("movieName"),
+                            rs.getString("day"), rs.getString("theaterName")));
+                }
             }
         } catch (SQLException e) {
             e.printStackTrace();
-
         }
         return reservations;
     }
