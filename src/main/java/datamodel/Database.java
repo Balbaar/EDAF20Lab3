@@ -162,6 +162,22 @@ public Show getShowData(String mTitle, String mDate) {
         try {
             conn.setAutoCommit(false); // Start transaction
 
+            // Check available seats
+            String checkSeatsQuery = "SELECT freeSeats FROM Shows WHERE movieName = ? AND day = ?";
+            try (PreparedStatement pstmt = conn.prepareStatement(checkSeatsQuery)) {
+                pstmt.setString(1, movieName);
+                pstmt.setString(2, date);
+                try (ResultSet rs = pstmt.executeQuery()) {
+                    if (rs.next()) {
+                        int freeSeats = rs.getInt("freeSeats");
+                        if (freeSeats <= 0) {
+                            conn.rollback(); // Rollback transaction if no seats are available
+                            return false;
+                        }
+                    }
+                }
+            }
+
             // Get theater name
             String queryTheater = "SELECT theaterName FROM Shows WHERE movieName = ? AND day = ?";
             try (PreparedStatement pstmt = conn.prepareStatement(queryTheater)) {
@@ -185,6 +201,14 @@ public Show getShowData(String mTitle, String mDate) {
                     pstmt.executeUpdate();
                     success = true;
                 }
+            }
+
+            //Decrement freeSeats
+            String updateShow = "UPDATE Shows SET freeSeats = freeSeats - 1 WHERE movieName = ? AND day = ?";
+            try (PreparedStatement pstmt = conn.prepareStatement(updateShow)) {
+                pstmt.setString(1, movieName);
+                pstmt.setString(2, date);
+                pstmt.executeUpdate();
             }
 
             conn.commit(); // Commit transaction
